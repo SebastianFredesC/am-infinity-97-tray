@@ -11,6 +11,7 @@ Monitor de las dos baterías del Angry Miao AM Infinity .97 conectado por su rec
 1. Conecta un receptor .97 y ejecuta **AMInfinity97Tray.exe**. Busca el icono de batería en el área de notificaciones, incluida la sección de iconos ocultos.
 2. Mueve el .97 para obtener la primera lectura. Pasa el cursor sobre el icono para ver las dos baterías y la hora. Haz clic para abrir el panel oscuro con los niveles y sus barras. El panel se cierra al hacer clic fuera o pulsar Esc.
 3. Usa **Actualizar ahora** en el panel para consultar ambas baterías con actividad reciente del .97 y al menos 5 segundos desde el intento anterior. Si el mouse está en reposo, la solicitud espera a que vuelvas a moverlo. El menú contextual contiene el intervalo automático, las notificaciones, el inicio con Windows y la pausa para reservar el receptor a AM Master.
+4. Elige **Idioma → English** en el menú contextual para usar la app en inglés. Para volver al español, elige **Language → Español**. La elección se guarda para la próxima vez que abras la app.
 
 El icono de batería representa el nivel de la batería instalada. Verde para más de 30%, amarillo de 11 a 30%, rojo de 0 a 10% y gris mientras se desconoce el valor. El panel conserva la última lectura tras un error o una desconexión e indica cuándo es anterior. Si el receptor informa de una batería de repuesto ausente, el panel indica «No instalada». Las alertas predeterminadas son al 20% y al 5%, con repetición solo tras recuperación o cuando el nivel pasa de bajo a crítico. Una batería que está cargando queda exenta de avisos. Windows controla la presentación de las notificaciones.
 
@@ -20,6 +21,7 @@ El inicio con Windows está desactivado por defecto y usa la clave de inicio de 
 
 | Propiedad | Valor inicial | Descripción |
 | --- | ---: | --- |
+| Language | es | Idioma de la interfaz. Usa es para español o en para inglés. |
 | Interval | 60 | Segundos entre intentos automáticos de batería. Rango de 60 a 3600. |
 | Notifications | true | Alertas para lecturas nuevas. |
 | StabilizationMs | 350 | Espera tras la entrada física. Rango de 200 a 1000 ms. |
@@ -62,4 +64,4 @@ dotnet publish .\src\AMInfinity97Tray.csproj -c Release -r win-x64 --self-contai
 
 Las pruebas automatizadas usan informes sintéticos y cubren porcentajes, ventanas de actividad, alertas y validación de tramas. La prueba opcional con **--receptor** comprueba el descubrimiento de Windows sin enviar informes HID. El modo **--diagnostico** de la aplicación conserva hasta 256 eventos en memoria y solo escribe al usar **Guardar diagnóstico…**. [Procedimiento con el mouse físico](PRUEBAS-HARDWARE.md)
 
-La compilación pasó 34 pruebas automatizadas. En Windows 10 22H2, una prueba en hardware con el mouse y el receptor en firmware **v1.8.4** obtuvo ambos porcentajes y el estado de carga del repuesto mediante el informe 0x14. Ese receptor también anuncia 0x06 y 0x07, canal por el que las pruebas de batería agotaron el tiempo de espera. La comparación controlada del consumo y la suspensión sigue descrita en el procedimiento con el mouse físico.
+La compilación pasó 36 pruebas automatizadas. En Windows 10 22H2, una prueba en hardware con el mouse y el receptor en firmware **v1.8.4** obtuvo ambos porcentajes y el estado de carga del repuesto mediante el informe 0x14. Ese receptor también anuncia 0x06 y 0x07, canal por el que las pruebas de batería agotaron el tiempo de espera. La comparación controlada del consumo y la suspensión sigue descrita en el procedimiento con el mouse físico.

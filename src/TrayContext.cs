@@ -10,31 +10,40 @@ internal sealed class TrayContext : ApplicationContext
     private readonly BatteryMonitor monitor;
     private readonly TrayMenu menu = new();
     private readonly TrayMenu intervalMenu = new();
-    private readonly ToolStripMenuItem startup = new("Iniciar con Windows");
-    private readonly ToolStripMenuItem notifications = new("Notificaciones de batería baja");
-    private readonly ToolStripMenuItem pause = new("Pausar monitoreo");
+    private readonly TrayMenu languageMenu = new();
+    private readonly ToolStripMenuItem startup = new();
+    private readonly ToolStripMenuItem notifications = new();
+    private readonly ToolStripMenuItem pause = new();
     private readonly TraySubmenuItem intervals;
+    private readonly TraySubmenuItem languages;
+    private readonly ToolStripMenuItem spanish = new("Español");
+    private readonly ToolStripMenuItem english = new("English");
+    private readonly ToolStripMenuItem exit = new();
     private readonly System.Windows.Forms.Timer shellRetry = new() { Interval = 5000 };
     private BatteryPanel? panel;
+    private ToolStripMenuItem? saveDiagnostics;
     private Preferences preferences;
+    private UiText text;
     private Point rightClickPoint;
     private long? rightClickAt;
     private MonitorDisplay display = new(LinkState.Detecting, default, default, false, false);
 
     internal TrayContext(bool diagnosticMode)
     {
-        intervals = new("Intervalo de actualización", intervalMenu) { DropDown = intervalMenu };
+        intervals = new("", intervalMenu) { DropDown = intervalMenu };
+        languages = new("", languageMenu) { DropDown = languageMenu };
         diagnostics = new(diagnosticMode);
         preferences = Preferences.Load(diagnostics);
+        text = new(preferences.Language);
         tray = new(window.Handle);
         monitor = new(window, diagnostics, preferences);
         monitor.Changed += Render;
-        monitor.Alert += (critical, message) => tray.Notify(
-            critical ? "Batería crítica · AM Infinity .97" : "Batería baja · AM Infinity .97", message, critical);
+        monitor.Alert += ShowBatteryAlert;
         window.TrayEvent += OnTrayEvent;
         window.ShellRestarted += AddTray;
         shellRetry.Tick += (_, _) => AddTray();
         ConfigureMenu();
+        ApplyMenuText();
         ApplyMenuTheme();
         Render(display);
         monitor.Start();
@@ -75,22 +84,70 @@ internal sealed class TrayContext : ApplicationContext
             intervals.DropDownItems.Add(item);
         }
         menu.Items.Add(intervals);
+        spanish.Click += (_, _) => SelectLanguage(UiText.Spanish);
+        english.Click += (_, _) => SelectLanguage(UiText.English);
+        languageMenu.Items.AddRange([spanish, english]);
+        menu.Items.Add(languages);
         pause.Click += (_, _) =>
         {
             monitor.SetPaused(!monitor.Paused);
             pause.Checked = monitor.Paused;
-            pause.Text = monitor.Paused ? "Reanudar monitoreo" : "Pausar monitoreo";
+            UpdatePauseText();
         };
         menu.Items.Add(pause);
         if (diagnostics.Enabled)
-            menu.Items.Add("Guardar diagnóstico…", null, (_, _) => ExportDiagnostics());
+        {
+            saveDiagnostics = new();
+            saveDiagnostics.Click += (_, _) => ExportDiagnostics();
+            menu.Items.Add(saveDiagnostics);
+        }
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Salir", null, (_, _) => ExitThread());
+        exit.Click += (_, _) => ExitThread();
+        menu.Items.Add(exit);
         menu.Closed += (_, e) =>
         {
             if (e.CloseReason == ToolStripDropDownCloseReason.Keyboard)
                 tray.RestoreFocus();
         };
+    }
+
+    private void SelectLanguage(string language) => TryPreference(() =>
+    {
+        if (preferences.Language == language)
+            return;
+
+        SavePreferences(preferences with { Language = language });
+        text = new(language);
+        ApplyMenuText();
+        RefreshDisplay();
+    });
+
+    private void ApplyMenuText()
+    {
+        startup.Text = text["StartWithWindows"];
+        notifications.Text = text["LowBatteryNotifications"];
+        intervals.Text = text["RefreshInterval"];
+        languages.Text = text["Language"];
+        spanish.Checked = preferences.Language == UiText.Spanish;
+        english.Checked = preferences.Language == UiText.English;
+        UpdatePauseText();
+        if (saveDiagnostics is not null)
+            saveDiagnostics.Text = text["SaveDiagnostics"];
+        exit.Text = text["Exit"];
+    }
+
+    private void UpdatePauseText() => pause.Text = text[monitor.Paused ? "ResumeMonitoring" : "PauseMonitoring"];
+
+    private void ShowBatteryAlert(BatteryNotice? mouse, BatteryNotice? spare)
+    {
+        var lines = new List<string>(2);
+        if (mouse is BatteryNotice mouseNotice)
+            lines.Add(text.AlertLine(mouseNotice, false));
+        if (spare is BatteryNotice spareNotice)
+            lines.Add(text.AlertLine(spareNotice, true));
+        bool critical = mouse?.Level == AlertLevel.Critical || spare?.Level == AlertLevel.Critical;
+        tray.Notify(text[critical ? "BatteryCriticalTitle" : "BatteryLowTitle"],
+            string.Join(Environment.NewLine, lines), critical);
     }
 
     private void SavePreferences(Preferences updated)
@@ -106,6 +163,7 @@ internal sealed class TrayContext : ApplicationContext
         var renderer = new TrayMenuRenderer(new TrayPalette(false)) { RoundedEdges = false };
         menu.Renderer = renderer;
         intervalMenu.Renderer = renderer;
+        languageMenu.Renderer = renderer;
     }
 
     private bool StartupStatus()
@@ -124,7 +182,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SecurityException)
         {
             diagnostics.Write($"Preferencias: {error.GetType().Name}");
-            tray.Notify(DisplayText.Title, "Windows no permitió guardar el cambio.", true);
+            tray.Notify(UiText.Title, text["SaveError"], true);
         }
     }
 
@@ -132,8 +190,8 @@ internal sealed class TrayContext : ApplicationContext
     {
         using var save = new SaveFileDialog
         {
-            FileName = "AMInfinity97-diagnostico.txt",
-            Filter = "Archivo de texto (*.txt)|*.txt",
+            FileName = text["DiagnosticsFileName"],
+            Filter = text["DiagnosticsFileFilter"],
             DefaultExt = "txt"
         };
         if (save.ShowDialog() == DialogResult.OK)
@@ -157,7 +215,7 @@ internal sealed class TrayContext : ApplicationContext
             rightClickAt = null;
             panel?.Hide();
             startup.Checked = StartupStatus();
-            menu.WorkArea = intervalMenu.WorkArea = Screen.FromPoint(anchor).WorkingArea;
+            menu.WorkArea = intervalMenu.WorkArea = languageMenu.WorkArea = Screen.FromPoint(anchor).WorkingArea;
             window.PrepareTrayMenu(anchor);
             menu.ShowAt(anchor);
         }
@@ -171,7 +229,7 @@ internal sealed class TrayContext : ApplicationContext
             panel.RefreshRequested += monitor.RequestUpdate;
             panel.VisibleChanged += (_, _) => monitor.SetPanelVisible(panel.Visible);
         }
-        panel.Render(display);
+        panel.Render(display, text);
         panel.Present(tray.Anchor());
     }
 
@@ -186,10 +244,15 @@ internal sealed class TrayContext : ApplicationContext
         if (display == value && tray.IsAdded)
             return;
         display = value;
-        tray.Set(MonitorPolicy.IconBand(value.Mouse.Sample?.Percent), DisplayText.Tooltip(value));
+        RefreshDisplay();
+    }
+
+    private void RefreshDisplay()
+    {
+        tray.Set(MonitorPolicy.IconBand(display.Mouse.Sample?.Percent), text.Tooltip(display));
         shellRetry.Enabled = !tray.IsAdded;
         if (panel?.Visible == true)
-            panel.Render(value);
+            panel.Render(display, text);
     }
 
     protected override void Dispose(bool disposing)
@@ -201,6 +264,7 @@ internal sealed class TrayContext : ApplicationContext
             panel?.Dispose();
             menu.Dispose();
             intervalMenu.Dispose();
+            languageMenu.Dispose();
             tray.Dispose();
             window.Dispose();
         }

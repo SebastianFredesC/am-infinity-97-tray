@@ -10,6 +10,7 @@ internal readonly record struct Sample(int? Percent, bool Charging, DateTimeOffs
 internal readonly record struct BatteryDisplay(Sample? Sample, bool Stale);
 internal readonly record struct MonitorDisplay(LinkState Link, BatteryDisplay Mouse, BatteryDisplay Spare,
     bool ManualPending, bool RateLimited);
+internal readonly record struct BatteryNotice(int Percent, AlertLevel Level);
 
 internal sealed class BatteryMonitor : IDisposable
 {
@@ -48,7 +49,7 @@ internal sealed class BatteryMonitor : IDisposable
     private LinkState? problem;
 
     internal event Action<MonitorDisplay>? Changed;
-    internal event Action<bool, string>? Alert;
+    internal event Action<BatteryNotice?, BatteryNotice?>? Alert;
     internal bool Paused => paused;
     internal bool Notifications { get; set; }
 
@@ -251,7 +252,7 @@ internal sealed class BatteryMonitor : IDisposable
         if (diagnostics.Enabled && lastLoggedLink != link)
         {
             lastLoggedLink = link;
-            diagnostics.Write(DisplayText.Link(link));
+            diagnostics.Write(UiText.Default.Link(link));
         }
         Changed?.Invoke(new(link, mouseDisplay, spareDisplay, manualPending, now < eligibleAt));
         if (next != long.MaxValue)
@@ -389,13 +390,9 @@ internal sealed class BatteryMonitor : IDisposable
         var spareNotice = spareAlert.Observe(result.Spare);
         if (Notifications && (mouseNotice.HasValue || spareNotice.HasValue))
         {
-            var lines = new List<string>(2);
-            if (mouseNotice is AlertLevel mouseLevel)
-                lines.Add($"Mouse: {result.Mouse.Percent}% ({AlertText(mouseLevel)})");
-            if (spareNotice is AlertLevel spareLevel)
-                lines.Add($"Repuesto: {result.Spare.Percent}% ({AlertText(spareLevel)})");
-            Alert?.Invoke(mouseNotice == AlertLevel.Critical || spareNotice == AlertLevel.Critical,
-                string.Join(Environment.NewLine, lines));
+            Alert?.Invoke(
+                mouseNotice is AlertLevel mouseLevel ? new BatteryNotice(result.Mouse.Percent, mouseLevel) : null,
+                spareNotice is AlertLevel spareLevel ? new BatteryNotice(result.Spare.Percent, spareLevel) : null);
         }
     }
 
@@ -405,8 +402,6 @@ internal sealed class BatteryMonitor : IDisposable
         if (!failed)
             slot = new(reply.Status == ReplyStatus.Level ? reply.Percent : null, reply.Charging, time, startedAt);
     }
-
-    private static string AlertText(AlertLevel level) => level == AlertLevel.Critical ? "crítica" : "baja";
 
     private void ScheduleRediscovery() => discoveryAt = Environment.TickCount64 +
         MonitorPolicy.Backoff(++discoveryFailures, preferences.ReconnectStartSeconds, preferences.ReconnectMaxSeconds);

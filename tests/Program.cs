@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Text.Json;
 using AMInfinity97Tray;
 
 if (args is ["--receptor"])
@@ -168,6 +169,31 @@ Check("Submenú se abre hacia dentro junto a los bordes de la pantalla", () =>
     var size = new Size(125, 160);
     Expect(TraySubmenuItem.Place(new Rectangle(-245, 780, 245, 245), 920, size, area) == new Point(-369, 880));
     Expect(TraySubmenuItem.Place(new Rectangle(-1920, 100, 245, 245), 160, size, area) == new Point(-1676, 160));
+});
+Check("La preferencia de idioma conserva compatibilidad con configuraciones anteriores", () =>
+{
+    var previous = JsonSerializer.Deserialize<Preferences>("""{"Interval":120,"Notifications":false}""");
+    Expect(previous is { Language: UiText.Spanish, Interval: 120, Notifications: false });
+    var updated = previous! with { Language = UiText.English };
+    Expect(JsonSerializer.Deserialize<Preferences>(JsonSerializer.Serialize(updated)) == updated);
+    Expect(UiText.NormalizeLanguage("XX") == UiText.Spanish);
+});
+Check("Panel, avisos y menú ofrecen traducciones en inglés", () =>
+{
+    var es = UiText.Default;
+    var en = new UiText(UiText.English);
+    Expect(es["Language"] == "Idioma" && en["Language"] == "Language");
+    Expect(es["RefreshNow"] == "Actualizar ahora" && en["RefreshNow"] == "Refresh now");
+    foreach (var state in Enum.GetValues<LinkState>())
+        Expect(en.Link(state) != es.Link(state));
+
+    var time = new DateTimeOffset(2026, 1, 1, 14, 25, 51, TimeSpan.Zero);
+    var spare = new BatteryDisplay(new Sample(81, true, time, 0), false);
+    var display = new MonitorDisplay(LinkState.PossibleSleep, default, spare, true, false);
+    Expect(en.Tooltip(display).Contains("Spare battery: 81% (Charging)\nLast updated: 14:25:51"));
+    Expect(en.Time(spare with { Stale = true }) == "Last reading · 14:25:51");
+    Expect(en.ManualPending(display) == "Move the .97 to refresh.");
+    Expect(en.AlertLine(new BatteryNotice(5, AlertLevel.Critical), true) == "Spare battery: 5% (critical)");
 });
 
 Console.WriteLine($"{count} pruebas correctas.");

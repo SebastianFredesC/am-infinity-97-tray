@@ -8,7 +8,8 @@ internal sealed record Preferences(int Interval = 60, bool Notifications = true,
     int StabilizationMs = (int)MonitorPolicy.StabilizationMs,
     int ReconnectStartSeconds = 5, int ReconnectMaxSeconds = 120,
     int BusyStartSeconds = 120, int BusyMaxSeconds = 900,
-    int LowPercent = MonitorPolicy.LowPercent, int CriticalPercent = MonitorPolicy.CriticalPercent)
+    int LowPercent = MonitorPolicy.LowPercent, int CriticalPercent = MonitorPolicy.CriticalPercent,
+    string Language = UiText.Spanish)
 {
     private const string RunPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunName = "AMInfinity97Tray";
@@ -48,7 +49,8 @@ internal sealed record Preferences(int Interval = 60, bool Notifications = true,
             BusyStartSeconds = busyStart,
             BusyMaxSeconds = Math.Clamp(BusyMaxSeconds, busyStart, 3600),
             LowPercent = low,
-            CriticalPercent = Math.Clamp(CriticalPercent, 0, low - 1)
+            CriticalPercent = Math.Clamp(CriticalPercent, 0, low - 1),
+            Language = UiText.NormalizeLanguage(Language)
         };
     }
 

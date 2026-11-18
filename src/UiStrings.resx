@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="LinkDetecting" xml:space="preserve"><value>Buscando el receptor USB…</value></data>
+  <data name="LinkMissing" xml:space="preserve"><value>Receptor USB desconectado</value></data>
+  <data name="LinkMultiple" xml:space="preserve"><value>Hay más de un receptor .97. Conecta solo uno.</value></data>
+  <data name="LinkWaitingInput" xml:space="preserve"><value>Receptor conectado · esperando actividad del mouse</value></data>
+  <data name="LinkActive" xml:space="preserve"><value>Receptor conectado · actividad reciente del mouse</value></data>
+  <data name="LinkPossibleSleep" xml:space="preserve"><value>Receptor conectado · mouse posiblemente en reposo o apagado</value></data>
+  <data name="LinkReading" xml:space="preserve"><value>Consultando las baterías…</value></data>
+  <data name="LinkNoReply" xml:space="preserve"><value>El receptor no devolvió el nivel de batería</value></data>
+  <data name="LinkBatteryMissing" xml:space="preserve"><value>El mouse reportó que no tiene batería instalada</value></data>
+  <data name="LinkError" xml:space="preserve"><value>Error de comunicación con el receptor o el mouse</value></data>
+  <data name="LinkBusy" xml:space="preserve"><value>Acceso al receptor ocupado o denegado · reintento aplazado</value></data>
+  <data name="LinkUnsupported" xml:space="preserve"><value>El receptor expone un canal HID no compatible</value></data>
+  <data name="LinkPaused" xml:space="preserve"><value>Monitoreo en pausa</value></data>
+  <data name="LinkSuspended" xml:space="preserve"><value>Windows en suspensión</value></data>
+  <data name="LinkInputUnavailable" xml:space="preserve"><value>Receptor conectado · detección de actividad no disponible</value></data>
+  <data name="Mouse" xml:space="preserve"><value>Mouse</value></data>
+  <data name="SpareBattery" xml:space="preserve"><value>Batería de repuesto</value></data>
+  <data name="UnknownLevel" xml:space="preserve"><value>Nivel desconocido</value></data>
+  <data name="BatteryAbsent" xml:space="preserve"><value>No instalada</value></data>
+  <data name="Charging" xml:space="preserve"><value>Cargando</value></data>
+  <data name="Charged" xml:space="preserve"><value>Cargada</value></data>
+  <data name="NotCharging" xml:space="preserve"><value>Sin carga activa</value></data>
+  <data name="NoReading" xml:space="preserve"><value>Sin lectura</value></data>
+  <data name="LastReading" xml:space="preserve"><value>Última lectura · {0}</value></data>
+  <data name="ReadAt" xml:space="preserve"><value>Leída a las {0}</value></data>
+  <data name="LastUpdated" xml:space="preserve"><value>Última actualización</value></data>
+  <data name="EarlierReading" xml:space="preserve"><value>anterior</value></data>
+  <data name="RefreshNow" xml:space="preserve"><value>Actualizar ahora</value></data>
+  <data name="ClosePanel" xml:space="preserve"><value>Cerrar panel</value></data>
+  <data name="ResumeToRefresh" xml:space="preserve"><value>Reanuda el monitoreo para actualizar.</value></data>
+  <data name="WaitForReceiver" xml:space="preserve"><value>Esperando el receptor USB.</value></data>
+  <data name="ConnectOneReceiver" xml:space="preserve"><value>Conecta un solo receptor .97.</value></data>
+  <data name="WaitForAccess" xml:space="preserve"><value>Esperando acceso al receptor.</value></data>
+  <data name="WaitBetweenReads" xml:space="preserve"><value>Esperando unos segundos entre lecturas…</value></data>
+  <data name="MoveMouseToRefresh" xml:space="preserve"><value>Mueve el .97 para actualizar.</value></data>
+  <data name="StartWithWindows" xml:space="preserve"><value>Iniciar con Windows</value></data>
+  <data name="LowBatteryNotifications" xml:space="preserve"><value>Notificaciones de batería baja</value></data>
+  <data name="RefreshInterval" xml:space="preserve"><value>Intervalo de actualización</value></data>
+  <data name="Language" xml:space="preserve"><value>Idioma</value></data>
+  <data name="PauseMonitoring" xml:space="preserve"><value>Pausar monitoreo</value></data>
+  <data name="ResumeMonitoring" xml:space="preserve"><value>Reanudar monitoreo</value></data>
+  <data name="SaveDiagnostics" xml:space="preserve"><value>Guardar diagnóstico…</value></data>
+  <data name="DiagnosticsFileName" xml:space="preserve"><value>AMInfinity97-diagnostico.txt</value></data>
+  <data name="DiagnosticsFileFilter" xml:space="preserve"><value>Archivo de texto (*.txt)|*.txt</value></data>
+  <data name="Exit" xml:space="preserve"><value>Salir</value></data>
+  <data name="SaveError" xml:space="preserve"><value>Windows no permitió guardar el cambio.</value></data>
+  <data name="BatteryLowTitle" xml:space="preserve"><value>Batería baja · AM Infinity .97</value></data>
+  <data name="BatteryCriticalTitle" xml:space="preserve"><value>Batería crítica · AM Infinity .97</value></data>
+  <data name="AlertLow" xml:space="preserve"><value>baja</value></data>
+  <data name="AlertCritical" xml:space="preserve"><value>crítica</value></data>
+</root>

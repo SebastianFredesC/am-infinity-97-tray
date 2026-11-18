@@ -9,6 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>AMInfinity97Tray</AssemblyName>
+    <Version>1.1.0</Version>
     <ApplicationIcon>Assets/Battery.ico</ApplicationIcon>
     <SatelliteResourceLanguages>es;en</SatelliteResourceLanguages>
   </PropertyGroup>

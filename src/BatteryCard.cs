@@ -4,6 +4,7 @@ namespace AMInfinity97Tray;
 
 internal sealed class BatteryCard : TableLayoutPanel
 {
+    private readonly Label heading = new() { AutoSize = true, Margin = Padding.Empty };
     private readonly Label value = new() { AutoSize = true, Margin = Padding.Empty };
     private readonly Label detail = new() { AutoSize = true, Margin = new Padding(0, 7, 0, 0) };
     private readonly Label time = new() { AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
@@ -11,7 +12,7 @@ internal sealed class BatteryCard : TableLayoutPanel
     private readonly bool spare;
     private readonly TrayPalette palette;
 
-    internal BatteryCard(string title, bool spare, Font valueFont, TrayPalette palette)
+    internal BatteryCard(bool spare, Font valueFont, TrayPalette palette)
     {
         this.spare = spare;
         this.palette = palette;
@@ -29,10 +30,8 @@ internal sealed class BatteryCard : TableLayoutPanel
         BackColor = palette.Surface;
         ForeColor = palette.Text;
 
-        Controls.Add(new Label
-        {
-            Text = title, AutoSize = true, ForeColor = palette.Secondary, Margin = Padding.Empty
-        }, 0, 0);
+        heading.ForeColor = palette.Secondary;
+        Controls.Add(heading, 0, 0);
         value.Font = valueFont;
         Controls.Add(value, 0, 1);
         Controls.Add(meter, 0, 2);
@@ -40,20 +39,19 @@ internal sealed class BatteryCard : TableLayoutPanel
         Controls.Add(time, 0, 4);
     }
 
-    internal void Render(BatteryDisplay battery)
+    internal void Render(BatteryDisplay battery, UiText text)
     {
         int? percent = battery.Sample?.Percent;
         bool charging = spare && battery.Sample?.Charging == true && percent.HasValue;
         Color fill = charging ? palette.Accent : palette.Level(percent);
+        heading.Text = text.BatteryName(spare);
         value.Text = percent is int number ? $"{number}%" : "—";
         value.ForeColor = battery.Stale || percent is null ? palette.Secondary : palette.Text;
         meter.SetLevel(percent, battery.Stale ? palette.Secondary : fill);
         detail.ForeColor = charging && !battery.Stale ? palette.Accent : palette.Secondary;
-        detail.Text = battery.Sample is null ? "Nivel desconocido" :
-            percent is null ? "No instalada" :
-            !spare ? "" : charging ? "Cargando" : percent == 100 ? "Cargada" : "Sin carga activa";
+        detail.Text = text.BatteryDetail(battery, spare);
         detail.Visible = detail.Text.Length != 0;
-        time.Text = DisplayText.Time(battery);
+        time.Text = text.Time(battery);
         time.ForeColor = battery.Stale ? palette.Warning : palette.Secondary;
     }
 

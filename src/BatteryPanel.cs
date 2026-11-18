@@ -2,72 +2,13 @@ using System.Drawing.Drawing2D;
 
 namespace AMInfinity97Tray;
 
-internal static class DisplayText
-{
-    internal const string Title = "Angry Miao Infinity .97";
-
-    internal static string Link(LinkState state) => state switch
-    {
-        LinkState.Detecting => "Buscando el receptor USB…",
-        LinkState.Missing => "Receptor USB desconectado",
-        LinkState.Multiple => "Hay más de un receptor .97. Conecta solo uno.",
-        LinkState.WaitingInput => "Receptor conectado · esperando actividad del mouse",
-        LinkState.Active => "Receptor conectado · actividad reciente del mouse",
-        LinkState.PossibleSleep => "Receptor conectado · mouse posiblemente en reposo o apagado",
-        LinkState.Reading => "Consultando las baterías…",
-        LinkState.NoReply => "El receptor no devolvió el nivel de batería",
-        LinkState.BatteryMissing => "El mouse reportó que no tiene batería instalada",
-        LinkState.Error => "Error de comunicación con el receptor o el mouse",
-        LinkState.Busy => "Acceso al receptor ocupado o denegado · reintento aplazado",
-        LinkState.Unsupported => "El receptor expone un canal HID no compatible",
-        LinkState.Paused => "Monitoreo en pausa",
-        LinkState.Suspended => "Windows en suspensión",
-        LinkState.InputUnavailable => "Receptor conectado · detección de actividad no disponible",
-        _ => ""
-    };
-
-    internal static string Level(BatteryDisplay battery, bool spare)
-    {
-        if (battery.Sample is not Sample sample)
-            return "Desconocida";
-        if (sample.Percent is not int percent)
-            return "No instalada";
-        string level = $"{percent}%";
-        if (spare)
-            level += sample.Charging ? " (Cargando)" : percent == 100 ? " (Cargada)" : " (Sin carga activa)";
-        return level;
-    }
-
-    internal static string Time(BatteryDisplay battery) => battery.Sample is Sample sample
-        ? (battery.Stale ? "Última lectura · " : "Leída a las ") + sample.At.ToString("HH:mm:ss")
-        : "Sin lectura";
-
-    internal static string Tooltip(MonitorDisplay display)
-    {
-        string mouse = Compact(display.Mouse, false);
-        string spare = Compact(display.Spare, true);
-        var last = display.Mouse.Sample?.At;
-        if (display.Spare.Sample is Sample sample && (last is null || sample.At > last))
-            last = sample.At;
-        string time = last?.ToString("HH:mm:ss") ?? "—";
-        return $"{Title}\nMouse: {mouse}\nBatería de repuesto: {spare}\nÚltima actualización: {time}";
-    }
-
-    private static string Compact(BatteryDisplay battery, bool spare)
-    {
-        string value = Level(battery, spare);
-        if (spare && value.EndsWith(" (Sin carga activa)", StringComparison.Ordinal))
-            value = value.Replace(" (Sin carga activa)", "");
-        return battery.Stale ? value + " (anterior)" : value;
-    }
-}
-
 internal sealed class BatteryPanel : Form
 {
     private readonly TrayPalette palette = new(SystemInformation.HighContrast);
     private readonly Label state = new() { AutoSize = true, UseMnemonic = false };
     private readonly Label stateDot = new() { AutoSize = true, Text = "●" };
     private readonly Label pending = new() { AutoSize = true, UseMnemonic = false, Visible = false };
+    private readonly CloseButton close;
     private readonly RefreshButton refresh;
     private readonly BatteryCard mouse;
     private readonly BatteryCard spare;
@@ -79,7 +20,7 @@ internal sealed class BatteryPanel : Form
 
     internal BatteryPanel()
     {
-        Text = DisplayText.Title;
+        Text = UiText.Title;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -92,9 +33,10 @@ internal sealed class BatteryPanel : Form
         ForeColor = palette.Text;
         titleFont = new Font(Font.FontFamily, 14, FontStyle.Bold);
         valueFont = new Font(Font.FontFamily, 25, FontStyle.Bold);
+        close = new CloseButton(palette);
         refresh = new RefreshButton(palette);
-        mouse = new BatteryCard("Mouse", false, valueFont, palette);
-        spare = new BatteryCard("Batería de repuesto", true, valueFont, palette);
+        mouse = new BatteryCard(false, valueFont, palette);
+        spare = new BatteryCard(true, valueFont, palette);
 
         var layout = new TableLayoutPanel
         {
@@ -125,10 +67,9 @@ internal sealed class BatteryPanel : Form
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28));
         header.Controls.Add(new Label
         {
-            Text = DisplayText.Title, Font = titleFont, AutoSize = true, UseMnemonic = false,
+            Text = UiText.Title, Font = titleFont, AutoSize = true, UseMnemonic = false,
             Margin = Padding.Empty, Anchor = AnchorStyles.Left
         }, 0, 0);
-        var close = new CloseButton(palette);
         close.Click += (_, _) => Hide();
         header.Controls.Add(close, 1, 0);
         return header;
@@ -138,7 +79,6 @@ internal sealed class BatteryPanel : Form
     {
         internal CloseButton(TrayPalette palette)
         {
-            AccessibleName = "Cerrar panel";
             Anchor = AnchorStyles.None;
             Size = new Size(28, 26);
             Margin = Padding.Empty;
@@ -204,7 +144,6 @@ internal sealed class BatteryPanel : Form
 
         internal RefreshButton(TrayPalette palette)
         {
-            Text = "Actualizar ahora";
             AutoSize = true;
             Margin = Padding.Empty;
             Padding = new Padding(7, 3, 7, 3);
@@ -233,10 +172,12 @@ internal sealed class BatteryPanel : Form
         }
     }
 
-    internal void Render(MonitorDisplay display)
+    internal void Render(MonitorDisplay display, UiText text)
     {
         SuspendLayout();
-        state.Text = DisplayText.Link(display.Link);
+        state.Text = text.Link(display.Link);
+        close.AccessibleName = text["ClosePanel"];
+        refresh.Text = text["RefreshNow"];
         stateDot.ForeColor = display.Link switch
         {
             LinkState.Active => palette.Positive,
@@ -244,20 +185,12 @@ internal sealed class BatteryPanel : Form
             LinkState.Busy or LinkState.Error or LinkState.NoReply => palette.Warning,
             _ => palette.Secondary
         };
-        mouse.Render(display.Mouse);
-        spare.Render(display.Spare);
+        mouse.Render(display.Mouse, text);
+        spare.Render(display.Spare, text);
         refresh.Enabled = !display.ManualPending && display.Link != LinkState.Reading;
         pending.Visible = display.ManualPending;
         if (display.ManualPending)
-            pending.Text = display.Link switch
-            {
-                LinkState.Paused => "Reanuda el monitoreo para actualizar.",
-                LinkState.Missing => "Esperando el receptor USB.",
-                LinkState.Multiple => "Conecta un solo receptor .97.",
-                LinkState.Busy when display.RateLimited => "Esperando acceso al receptor.",
-                _ when display.RateLimited => "Esperando unos segundos entre lecturas…",
-                _ => "Mueve el .97 para actualizar."
-            };
+            pending.Text = text.ManualPending(display);
         ResumeLayout(true);
         if (Visible)
             PlaceAtAnchor();
