@@ -25,6 +25,8 @@ Una comparación de cinco minutos permite verificar la pausa de la aplicación y
 | Retirar el repuesto y volver a insertarlo | En la siguiente ronda con actividad debe aparecer «No instalada» y luego volver el porcentaje. Si el repuesto está en carga, debe indicarlo. |
 | Apagar el mouse o cambiar su batería | El último porcentaje se conserva ante falta de respuesta. Si se devuelve una respuesta válida de 0%, se muestra 0%. |
 | Retirar y reconectar el receptor | Aparece el estado desconectado y se conservan los valores anteriores. La primera lectura siguiente requiere actividad física y respetar el intervalo. |
+| Con el .97 activo, seleccionar 1, 2, 4 y 8 kHz desde el menú | El panel y la marca del menú reflejan el valor devuelto por el mouse. Se puede comparar con AM Master al terminar. |
+| Seleccionar una frecuencia usando otro mouse mientras el .97 está quieto | Si pasan cinco segundos sin actividad del .97, el registro queda sin un intento de escritura y el panel muestra que no se pudo confirmar el cambio. |
 | Suspender y reanudar Windows | La aplicación sigue en la bandeja. Se necesita actividad nueva del .97 para consultar. |
 | Abrir AM Master mientras se usa el monitor | Abre la pantalla de configuración o lee los ajustes existentes. Si hay acceso denegado, el monitor conserva sus lecturas y aplaza los intentos. Si hay interferencia, pausa el monitor y comprueba que AM Master recupera el acceso. |
 | Usar el monitor pausado para configurar en AM Master | El diagnóstico queda sin consultas. Después de cerrar AM Master, reanuda el monitor y vuelve a mover el .97. |

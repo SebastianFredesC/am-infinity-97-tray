@@ -92,6 +92,58 @@ Check("Respuestas duplicadas no se aceptan", () =>
     var frame = Frame(0x30CF, [0, 0, 85, 0, 1]);
     Expect(Mouse(Report(frame, frame)).Status == ReplyStatus.Invalid);
 });
+Check("Solicitudes de polling rate por el canal del mouse", () =>
+{
+    Expect(PollingRateProtocol.ReadRequest(62).AsSpan(0, 9)
+        .SequenceEqual(new byte[] { 0x14, 6, 0x80, 5, 0x5A, 2, 0, 0x11, 0x30 }));
+    var rates = new (int Hertz, byte Low, byte High)[] { (1000, 0xE8, 3), (2000, 0xD0, 7), (4000, 0xA0, 0x0F), (8000, 0x40, 0x1F) };
+    Expect(PollingRateProtocol.Options.SequenceEqual(rates.Select(rate => rate.Hertz).ToArray()));
+    foreach (var (hertz, low, high) in rates)
+    {
+        var write = PollingRateProtocol.WriteRequest(62, hertz);
+        Expect(write.AsSpan(0, 11).SequenceEqual(new byte[] { 0x14, 8, 0x80, 5, 0x5A, 4, 0, 0x10, 0x30, low, high }));
+        Expect(write.AsSpan(11).IndexOfAnyExcept((byte)0) < 0);
+        Expect(PollingRateProtocol.Parse(Report(Frame(0x3011, [0, low, high]))) == (ReplyStatus.Level, hertz));
+    }
+});
+Check("Polling rate excluye 125, 250 y 500 Hz de las escrituras", () =>
+{
+    foreach (int hertz in new[] { 125, 250, 500, 1001, 16000 })
+    {
+        Expect(!PollingRateProtocol.CanSet(hertz));
+        try
+        {
+            PollingRateProtocol.WriteRequest(62, hertz);
+            throw new InvalidOperationException("Se generó una petición de escritura fuera de rango.");
+        }
+        catch (ArgumentOutOfRangeException) { }
+    }
+    Expect(PollingRateProtocol.Parse(Report(Frame(0x3011, [0, 0xF4, 1]))) == (ReplyStatus.Level, 500));
+});
+Check("Polling rate exige una respuesta válida de lectura", () =>
+{
+    byte[] ack = Frame(0x3010, [0], 0x5D);
+    byte[] read = Frame(0x3011, [0, 0xE8, 3]);
+    Expect(PollingRateProtocol.Parse(Report(ack)) == (ReplyStatus.Pending, null));
+    Expect(PollingRateProtocol.Parse(Report(ack, read)) == (ReplyStatus.Level, 1000));
+    Expect(PollingRateProtocol.Parse(Report(read, read)) == (ReplyStatus.Invalid, null));
+    Expect(PollingRateProtocol.Parse(Report(Frame(0x3011, [0, 0xE8]))) == (ReplyStatus.Invalid, null));
+    Expect(PollingRateProtocol.Parse(Report(Frame(0x3011, [2]))) == (ReplyStatus.Rejected, null));
+    Expect(PollingRateProtocol.Parse(Report(Frame(0x3011, [0, 0, 0]))) == (ReplyStatus.Invalid, null));
+});
+Check("Panel distingue el rate confirmado, pendiente y fuera del menú", () =>
+{
+    var rate = new PollingRateDisplay(1000, false, 4000, false, false);
+    var display = new MonitorDisplay(LinkState.Active, default, default, false, false, rate);
+    var en = new UiText(UiText.English);
+    Expect(en.PollingRate(rate) == "Polling rate · 1 kHz");
+    Expect(en.PollingMessage(display).Contains("4 kHz", StringComparison.Ordinal));
+    Expect(en.PollingMessage(display with { Link = LinkState.ChangingPollingRate }) == "");
+    Expect(en.PollingRate(rate with { Hertz = 250 }) == "Polling rate · Below 1 kHz");
+    Expect(en.PollingRate(rate with { Stale = true }) == "Polling rate · 1 kHz (previous)");
+    Expect(en.PollingMessage(display with { PollingRate = rate with { Requested = null, Unconfirmed = true } })
+        == "Could not confirm the polling rate change.");
+});
 Check("Puerta de actividad y estabilización", () =>
 {
     const long motion = 1000;

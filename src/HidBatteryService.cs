@@ -6,7 +6,8 @@ namespace AMInfinity97Tray;
 
 internal enum HidStatus { Ready, Missing, Multiple, Busy, Error, Unsupported }
 internal readonly record struct Discovery(HidStatus Status, string? Path = null);
-internal readonly record struct BatteryRead(HidStatus Status, BatteryReply Mouse = default, BatteryReply Spare = default);
+internal readonly record struct BatteryRead(HidStatus Status, BatteryReply Mouse = default, BatteryReply Spare = default,
+    int? PollingRate = null, bool? PollingRateSupported = null);
 
 internal sealed class HidBatteryService(Diagnostics diagnostics)
 {
@@ -15,6 +16,7 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
     private const int FeatureReplyTimeoutMs = 950;
     private const int InputReplyTimeoutMs = 1800;
     private const int ReplySpacingMs = 45;
+    private const int RateApplyDelayMs = 120;
     private const int HidSuccess = 0x00110000;
     internal static readonly Guid HidClass = new("4d1e55b2-f16f-11cf-88cb-001111000030");
     private static readonly PropertyKey UsagePage = new(new("cbf38310-4a17-4310-a1eb-247f0b67593b"), 2);
@@ -62,13 +64,14 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
         return new(HidStatus.Error);
     }
 
-    internal BatteryRead Read(string path, long activity, CancellationToken token)
+    internal BatteryRead Read(string path, long activity, CancellationToken token, int? requestedRate = null)
     {
         token.ThrowIfCancellationRequested();
         if (!MonitorPolicy.CanSend(Environment.TickCount64, activity))
             return new(HidStatus.Ready);
 
         BatteryReply mouse = default;
+        BatteryReply spare = default;
         try
         {
             // A shared handle is held only for this round. Access denial is left
@@ -82,11 +85,42 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
 
             using var completion = new EventWaitHandle(false, EventResetMode.ManualReset);
             WaitHandle[] waits = [completion, token.WaitHandle];
-            mouse = Query(device, completion, waits, BatteryTarget.Mouse, transport.Value, activity, token);
+            if (requestedRate is int hertz)
+            {
+                if (!transport.Value.Feature)
+                    return new(HidStatus.Unsupported, PollingRateSupported: false);
+
+                long deadline = Math.Min(Environment.TickCount64 + FeatureReplyTimeoutMs, activity + MonitorPolicy.CommandWindowMs);
+                byte[] request = PollingRateProtocol.WriteRequest(transport.Value.OutputLength, hertz);
+                diagnostics.Write($"Solicitud de polling rate: {hertz} Hz");
+                if (!Transfer(device, completion, waits, Operation.SetFeature, request, deadline, token, out _))
+                    return new(HidStatus.Ready, PollingRateSupported: true);
+
+                // A successful USB transfer only confirms delivery. Read back the setting
+                // after it has had time to apply, without retrying the write.
+                if (token.WaitHandle.WaitOne(RateApplyDelayMs))
+                    token.ThrowIfCancellationRequested();
+                int? confirmed = QueryRate(device, completion, waits, transport.Value, activity, token);
+                return new(HidStatus.Ready, PollingRate: confirmed, PollingRateSupported: true);
+            }
+
+            mouse = QueryBattery(device, completion, waits, BatteryTarget.Mouse, transport.Value, activity, token);
             if (mouse.Status != ReplyStatus.Level)
-                return new(HidStatus.Ready, mouse);
-            var spare = Query(device, completion, waits, BatteryTarget.Spare, transport.Value, activity, token);
-            return new(HidStatus.Ready, mouse, spare);
+                return new(HidStatus.Ready, mouse, PollingRateSupported: transport.Value.Feature);
+            spare = QueryBattery(device, completion, waits, BatteryTarget.Spare, transport.Value, activity, token);
+            if (!transport.Value.Feature)
+                return new(HidStatus.Ready, mouse, spare, PollingRateSupported: false);
+
+            int? rate = null;
+            try
+            {
+                rate = QueryRate(device, completion, waits, transport.Value, activity, token);
+            }
+            catch (Win32Exception error)
+            {
+                diagnostics.Write($"Polling rate HID Win32={error.NativeErrorCode} ({error.Message})");
+            }
+            return new(HidStatus.Ready, mouse, spare, rate, PollingRateSupported: true);
         }
         catch (Win32Exception error)
         {
@@ -96,14 +130,37 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
                 2 or 3 or 6 or 21 or 433 or 1167 or 1617 => HidStatus.Missing,
                 5 or 32 or 33 or 170 => HidStatus.Busy,
                 _ => HidStatus.Error
-            }, mouse);
+            }, mouse, spare);
         }
     }
 
-    private BatteryReply Query(SafeFileHandle device, EventWaitHandle completion, WaitHandle[] waits,
+    private BatteryReply QueryBattery(SafeFileHandle device, EventWaitHandle completion, WaitHandle[] waits,
         BatteryTarget target, Transport transport, long activity, CancellationToken token)
     {
         var request = BatteryProtocol.Request(target, transport.OutputLength, transport.OutputId);
+        var result = Query<BatteryReply>(device, completion, waits, transport, activity, token, request, target.ToString(), bytes =>
+        {
+            var parsed = BatteryProtocol.Parse(bytes, target, transport.InputId);
+            return (parsed.Status, parsed);
+        });
+        diagnostics.Write($"Respuesta {target}: {result.Status}, nivel={result.Value.Percent}, carga={result.Value.Charging}");
+        return result.Value with { Status = result.Status };
+    }
+
+    private int? QueryRate(SafeFileHandle device, EventWaitHandle completion, WaitHandle[] waits,
+        Transport transport, long activity, CancellationToken token)
+    {
+        var request = PollingRateProtocol.ReadRequest(transport.OutputLength);
+        var result = Query<int?>(device, completion, waits, transport, activity, token, request, "PollingRate", PollingRateProtocol.Parse);
+        diagnostics.Write($"Respuesta PollingRate: {result.Status}, Hz={result.Value}");
+        return result.Value;
+    }
+
+    private delegate (ReplyStatus Status, T Value) ReplyParser<T>(ReadOnlySpan<byte> report);
+
+    private (ReplyStatus Status, T Value) Query<T>(SafeFileHandle device, EventWaitHandle completion, WaitHandle[] waits,
+        Transport transport, long activity, CancellationToken token, byte[] request, string target, ReplyParser<T> parse)
+    {
         long now = Environment.TickCount64;
         if (!MonitorPolicy.CanSend(now, activity))
             return default;
@@ -141,7 +198,7 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
                 break;
 
             var bytes = response.AsSpan(0, Math.Min(received, response.Length));
-            var reply = BatteryProtocol.Parse(bytes, target, transport.InputId);
+            var reply = parse(bytes);
             if (reply.Status == ReplyStatus.Invalid)
             {
                 if (!invalidResponse && diagnostics.Enabled)
@@ -150,15 +207,10 @@ internal sealed class HidBatteryService(Diagnostics diagnostics)
                 continue;
             }
             if (reply.Status != ReplyStatus.Pending)
-            {
-                // Capture only the two battery values and protocol status. Reports can
-                // also contain somebody else's configuration replies.
-                diagnostics.Write($"Respuesta {target}: {reply.Status}, nivel={reply.Percent}, carga={reply.Charging}");
                 return reply;
-            }
         }
         diagnostics.Write($"Respuesta {target}: sin respuesta a tiempo");
-        return invalidResponse ? new(ReplyStatus.Invalid) : default;
+        return (invalidResponse ? ReplyStatus.Invalid : ReplyStatus.Pending, default!);
     }
 
     // Start listening before the single write, as a reply can arrive as soon as

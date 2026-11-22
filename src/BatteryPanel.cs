@@ -7,6 +7,8 @@ internal sealed class BatteryPanel : Form
     private readonly TrayPalette palette = new(SystemInformation.HighContrast);
     private readonly Label state = new() { AutoSize = true, UseMnemonic = false };
     private readonly Label stateDot = new() { AutoSize = true, Text = "●" };
+    private readonly Label pollingRate = new() { AutoSize = true, UseMnemonic = false };
+    private readonly Label pollingMessage = new() { AutoSize = true, UseMnemonic = false, Visible = false };
     private readonly Label pending = new() { AutoSize = true, UseMnemonic = false, Visible = false };
     private readonly CloseButton close;
     private readonly RefreshButton refresh;
@@ -55,7 +57,12 @@ internal sealed class BatteryPanel : Form
         cards.Controls.Add(spare, 2, 0);
         layout.Controls.Add(cards, 0, 2);
 
-        layout.Controls.Add(BuildActions(), 0, 3);
+        pollingRate.Margin = new Padding(0, 10, 0, 0);
+        layout.Controls.Add(pollingRate, 0, 3);
+        pollingMessage.MaximumSize = new Size(340, 0);
+        pollingMessage.Margin = new Padding(0, 3, 0, 0);
+        layout.Controls.Add(pollingMessage, 0, 4);
+        layout.Controls.Add(BuildActions(), 0, 5);
         Controls.Add(layout);
         Deactivate += (_, _) => Hide();
     }
@@ -181,12 +188,17 @@ internal sealed class BatteryPanel : Form
         stateDot.ForeColor = display.Link switch
         {
             LinkState.Active => palette.Positive,
-            LinkState.Reading => palette.Accent,
+            LinkState.Reading or LinkState.ChangingPollingRate => palette.Accent,
             LinkState.Busy or LinkState.Error or LinkState.NoReply => palette.Warning,
             _ => palette.Secondary
         };
         mouse.Render(display.Mouse, text);
         spare.Render(display.Spare, text);
+        pollingRate.Text = text.PollingRate(display.PollingRate);
+        pollingRate.ForeColor = display.PollingRate.Stale ? palette.Secondary : palette.Text;
+        pollingMessage.Text = text.PollingMessage(display);
+        pollingMessage.ForeColor = display.PollingRate.Unconfirmed ? palette.Warning : palette.Secondary;
+        pollingMessage.Visible = pollingMessage.Text.Length > 0;
         refresh.Enabled = !display.ManualPending && display.Link != LinkState.Reading;
         pending.Visible = display.ManualPending;
         if (display.ManualPending)

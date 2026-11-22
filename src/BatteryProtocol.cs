@@ -18,58 +18,71 @@ internal static class BatteryProtocol
     private const ushort SpareCommand = 12303;
 
     internal static byte[] Request(BatteryTarget target, int length, byte reportId = ReportId)
+        => BuildRequest(Command(target), target == BatteryTarget.Mouse && reportId == ReportId, length, reportId);
+
+    internal static byte[] BuildRequest(ushort command, bool relay, int length, byte reportId, ReadOnlySpan<byte> data = default)
     {
         var report = new byte[length];
         report[0] = reportId;
-        report[1] = 6;
-        report[2] = target == BatteryTarget.Mouse && reportId == ReportId ? (byte)0x80 : (byte)0x00;
+        report[1] = (byte)(6 + data.Length);
+        report[2] = relay ? (byte)0x80 : (byte)0x00;
         report[3] = 0x05;
         report[4] = 0x5A;
-        report[5] = 2;
-        BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7), Command(target));
+        BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(5), (ushort)(2 + data.Length));
+        BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7), command);
+        data.CopyTo(report.AsSpan(9));
         return report;
     }
 
     internal static BatteryReply Parse(ReadOnlySpan<byte> report, BatteryTarget target, byte reportId = ReportId)
     {
+        var status = MatchReply(report, Command(target), reportId, out var payload);
+        return status == ReplyStatus.Level ? ParseBattery(payload) : new(status);
+    }
+
+    internal static ReplyStatus MatchReply(ReadOnlySpan<byte> report, ushort command, byte reportId,
+        out ReadOnlySpan<byte> payload)
+    {
+        payload = default;
         if (report.Length < 3 || report[0] != reportId)
-            return new(ReplyStatus.Invalid);
+            return ReplyStatus.Invalid;
         bool streaming = reportId == InputReportId;
         bool bareFrame = streaming && report[1] is 0x05 or 0x15 && report[2] is 0x5B or 0x5D;
         int start = bareFrame ? 1 : 3;
         if (!bareFrame)
         {
             if (report[1] == 0)
-                return new(ReplyStatus.Pending);
+                return ReplyStatus.Pending;
             if (report[1] < 6 || report[1] > report.Length - start)
-                return new(ReplyStatus.Invalid);
+                return ReplyStatus.Invalid;
             if (streaming)
                 report = report[..(start + report[1])];
         }
 
-        var result = new BatteryReply(ReplyStatus.Pending);
+        var result = ReplyStatus.Pending;
         // Feature reports can include stacked frames after the first envelope.
         for (int offset = start; offset < report.Length && report[offset] != 0;)
         {
             var frame = report[offset..];
             if (frame.Length < 6 || (frame[0] != 0x05 && !(streaming && frame[0] == 0x15)) ||
                 frame[1] is not (0x5B or 0x5D))
-                return new(ReplyStatus.Invalid);
+                return ReplyStatus.Invalid;
             int length = BinaryPrimitives.ReadUInt16LittleEndian(frame[2..]);
             if (length < 2 || length > frame.Length - 4 ||
                 (!bareFrame && offset == start && length + 4 > report[1]))
-                return new(ReplyStatus.Invalid);
+                return ReplyStatus.Invalid;
 
-            if (frame[1] == 0x5B && BinaryPrimitives.ReadUInt16LittleEndian(frame[4..]) == Command(target))
+            if (frame[1] == 0x5B && BinaryPrimitives.ReadUInt16LittleEndian(frame[4..]) == command)
             {
                 // Duplicate matching replies are ambiguous. There is no request sequence number.
-                if (result.Status != ReplyStatus.Pending)
-                    return new(ReplyStatus.Invalid);
-                result = ParseBattery(frame.Slice(6, length - 2));
+                if (result != ReplyStatus.Pending)
+                    return ReplyStatus.Invalid;
+                payload = frame.Slice(6, length - 2);
+                result = ReplyStatus.Level;
             }
             offset += length + 4;
         }
-        return report[start] == 0 ? new(ReplyStatus.Invalid) : result;
+        return report[start] == 0 ? ReplyStatus.Invalid : result;
     }
 
     private static BatteryReply ParseBattery(ReadOnlySpan<byte> payload)

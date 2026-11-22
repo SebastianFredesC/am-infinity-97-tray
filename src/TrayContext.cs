@@ -11,11 +11,13 @@ internal sealed class TrayContext : ApplicationContext
     private readonly TrayMenu menu = new();
     private readonly TrayMenu intervalMenu = new();
     private readonly TrayMenu languageMenu = new();
+    private readonly TrayMenu pollingMenu = new();
     private readonly ToolStripMenuItem startup = new();
     private readonly ToolStripMenuItem notifications = new();
     private readonly ToolStripMenuItem pause = new();
     private readonly TraySubmenuItem intervals;
     private readonly TraySubmenuItem languages;
+    private readonly TraySubmenuItem polling;
     private readonly ToolStripMenuItem spanish = new("Español");
     private readonly ToolStripMenuItem english = new("English");
     private readonly ToolStripMenuItem exit = new();
@@ -32,6 +34,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         intervals = new("", intervalMenu) { DropDown = intervalMenu };
         languages = new("", languageMenu) { DropDown = languageMenu };
+        polling = new("", pollingMenu) { DropDown = pollingMenu, Enabled = false };
         diagnostics = new(diagnosticMode);
         preferences = Preferences.Load(diagnostics);
         text = new(preferences.Language);
@@ -84,6 +87,13 @@ internal sealed class TrayContext : ApplicationContext
             intervals.DropDownItems.Add(item);
         }
         menu.Items.Add(intervals);
+        foreach (int hertz in PollingRateProtocol.Options)
+        {
+            var item = new ToolStripMenuItem(UiText.FormatRate(hertz)) { Tag = hertz };
+            item.Click += (_, _) => monitor.RequestPollingRate(hertz);
+            pollingMenu.Items.Add(item);
+        }
+        menu.Items.Add(polling);
         spanish.Click += (_, _) => SelectLanguage(UiText.Spanish);
         english.Click += (_, _) => SelectLanguage(UiText.English);
         languageMenu.Items.AddRange([spanish, english]);
@@ -104,8 +114,10 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         exit.Click += (_, _) => ExitThread();
         menu.Items.Add(exit);
+        menu.Opened += (_, _) => monitor.SetInteractionVisible(true);
         menu.Closed += (_, e) =>
         {
+            monitor.SetInteractionVisible(panel?.Visible == true);
             if (e.CloseReason == ToolStripDropDownCloseReason.Keyboard)
                 tray.RestoreFocus();
         };
@@ -127,6 +139,7 @@ internal sealed class TrayContext : ApplicationContext
         startup.Text = text["StartWithWindows"];
         notifications.Text = text["LowBatteryNotifications"];
         intervals.Text = text["RefreshInterval"];
+        polling.Text = text["PollingRate"];
         languages.Text = text["Language"];
         spanish.Checked = preferences.Language == UiText.Spanish;
         english.Checked = preferences.Language == UiText.English;
@@ -164,6 +177,7 @@ internal sealed class TrayContext : ApplicationContext
         menu.Renderer = renderer;
         intervalMenu.Renderer = renderer;
         languageMenu.Renderer = renderer;
+        pollingMenu.Renderer = renderer;
     }
 
     private bool StartupStatus()
@@ -215,7 +229,7 @@ internal sealed class TrayContext : ApplicationContext
             rightClickAt = null;
             panel?.Hide();
             startup.Checked = StartupStatus();
-            menu.WorkArea = intervalMenu.WorkArea = languageMenu.WorkArea = Screen.FromPoint(anchor).WorkingArea;
+            menu.WorkArea = intervalMenu.WorkArea = languageMenu.WorkArea = pollingMenu.WorkArea = Screen.FromPoint(anchor).WorkingArea;
             window.PrepareTrayMenu(anchor);
             menu.ShowAt(anchor);
         }
@@ -227,7 +241,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             panel = new();
             panel.RefreshRequested += monitor.RequestUpdate;
-            panel.VisibleChanged += (_, _) => monitor.SetPanelVisible(panel.Visible);
+            panel.VisibleChanged += (_, _) => monitor.SetInteractionVisible(panel.Visible || menu.Visible);
         }
         panel.Render(display, text);
         panel.Present(tray.Anchor());
@@ -243,6 +257,13 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (display == value && tray.IsAdded)
             return;
+        if (display.PollingRate != value.PollingRate)
+        {
+            polling.Enabled = value.PollingRate.CanChange;
+            foreach (ToolStripMenuItem option in pollingMenu.Items)
+                option.Checked = !value.PollingRate.Stale && !value.PollingRate.Unsupported &&
+                    (int)option.Tag! == value.PollingRate.Hertz;
+        }
         display = value;
         RefreshDisplay();
     }
@@ -265,6 +286,7 @@ internal sealed class TrayContext : ApplicationContext
             menu.Dispose();
             intervalMenu.Dispose();
             languageMenu.Dispose();
+            pollingMenu.Dispose();
             tray.Dispose();
             window.Dispose();
         }

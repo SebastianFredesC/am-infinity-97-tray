@@ -21,6 +21,30 @@ internal sealed class UiText(string language)
     internal string Link(LinkState state) => this[$"Link{state}"];
     internal string BatteryName(bool spare) => this[spare ? "SpareBattery" : "Mouse"];
 
+    internal static string FormatRate(int hertz) => $"{hertz / 1000} kHz";
+
+    internal string PollingRate(PollingRateDisplay rate)
+    {
+        string value = rate switch
+        {
+            { Unsupported: true } => this["PollingRateUnsupported"],
+            { Hertz: int hertz } => PollingRateProtocol.CanSet(hertz) ? FormatRate(hertz) : this["PollingRateBelowRange"],
+            _ => "—"
+        };
+        if (rate is { Hertz: not null, Stale: true, Unsupported: false })
+            value += $" ({this["EarlierReading"]})";
+        return $"{this["PollingRate"]} · {value}";
+    }
+
+    internal string PollingMessage(MonitorDisplay display)
+    {
+        if (display.PollingRate.Unconfirmed)
+            return this["PollingRateUnconfirmed"];
+        if (display.Link != LinkState.ChangingPollingRate && display.PollingRate.Requested is int hertz)
+            return string.Format(culture, this["PollingRatePending"], FormatRate(hertz));
+        return "";
+    }
+
     internal string BatteryDetail(BatteryDisplay battery, bool spare) => battery.Sample switch
     {
         null => this["UnknownLevel"],

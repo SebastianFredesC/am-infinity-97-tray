@@ -11,6 +11,12 @@
   <data name="LinkActive" xml:space="preserve"><value>Receiver connected · recent mouse activity</value></data>
   <data name="LinkPossibleSleep" xml:space="preserve"><value>Receiver connected · mouse may be asleep or off</value></data>
   <data name="LinkReading" xml:space="preserve"><value>Reading batteries…</value></data>
+  <data name="LinkChangingPollingRate" xml:space="preserve"><value>Applying and verifying the polling rate…</value></data>
+  <data name="PollingRate" xml:space="preserve"><value>Polling rate</value></data>
+  <data name="PollingRateUnsupported" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="PollingRateBelowRange" xml:space="preserve"><value>Below 1 kHz</value></data>
+  <data name="PollingRatePending" xml:space="preserve"><value>Change to {0} pending · move the .97.</value></data>
+  <data name="PollingRateUnconfirmed" xml:space="preserve"><value>Could not confirm the polling rate change.</value></data>
   <data name="LinkNoReply" xml:space="preserve"><value>The receiver did not report a battery level</value></data>
   <data name="LinkBatteryMissing" xml:space="preserve"><value>The mouse reported that no battery is installed</value></data>
   <data name="LinkError" xml:space="preserve"><value>Communication error with the receiver or mouse</value></data>

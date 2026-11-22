@@ -3,17 +3,20 @@ namespace AMInfinity97Tray;
 internal enum LinkState
 {
     Detecting, Missing, Multiple, WaitingInput, Active, PossibleSleep,
-    Reading, NoReply, BatteryMissing, Error, Busy, Paused, Suspended, InputUnavailable, Unsupported
+    Reading, ChangingPollingRate, NoReply, BatteryMissing, Error, Busy, Paused, Suspended, InputUnavailable, Unsupported
 }
 
 internal readonly record struct Sample(int? Percent, bool Charging, DateTimeOffset At, long Tick);
 internal readonly record struct BatteryDisplay(Sample? Sample, bool Stale);
+internal readonly record struct PollingRateDisplay(int? Hertz, bool Stale, int? Requested, bool Unconfirmed,
+    bool CanChange, bool Unsupported = false);
 internal readonly record struct MonitorDisplay(LinkState Link, BatteryDisplay Mouse, BatteryDisplay Spare,
-    bool ManualPending, bool RateLimited);
+    bool ManualPending, bool RateLimited, PollingRateDisplay PollingRate = default);
 internal readonly record struct BatteryNotice(int Percent, AlertLevel Level);
 
 internal sealed class BatteryMonitor : IDisposable
 {
+    private const int RateRequestWindowMs = 5000;
     private readonly DeviceWindow window;
     private readonly HidBatteryService hid;
     private readonly Diagnostics diagnostics;
@@ -31,7 +34,7 @@ internal sealed class BatteryMonitor : IDisposable
     private bool suspended;
     private bool closed;
     private bool manualPending;
-    private bool panelVisible;
+    private bool interactionVisible;
     private bool inputUnavailable;
     private int interval;
     private int discoveryFailures;
@@ -44,6 +47,12 @@ internal sealed class BatteryMonitor : IDisposable
     private long accessUntil;
     private long? lastAttempt;
     private long? activity;
+    private int? pollingRate;
+    private int? requestedRate;
+    private int? unconfirmedRate;
+    private long rateRequestDeadline;
+    private bool rateStale;
+    private bool rateUnsupported;
     private LinkState link = LinkState.Detecting;
     private LinkState? lastLoggedLink;
     private LinkState? problem;
@@ -87,13 +96,38 @@ internal sealed class BatteryMonitor : IDisposable
         Evaluate();
     }
 
-    internal void SetPanelVisible(bool visible)
+    internal void SetInteractionVisible(bool visible)
     {
-        if (closed || panelVisible == visible)
+        if (closed || interactionVisible == visible)
             return;
 
-        panelVisible = visible;
+        interactionVisible = visible;
         Evaluate();
+    }
+
+    internal void RequestPollingRate(int hertz)
+    {
+        long now = Environment.TickCount64;
+        if (!CanChangePollingRate(now) || !PollingRateProtocol.CanSet(hertz))
+            return;
+
+        requestedRate = hertz;
+        unconfirmedRate = null;
+        rateRequestDeadline = now + RateRequestWindowMs;
+        Evaluate();
+    }
+
+    private bool CanChangePollingRate(long now) =>
+        !closed && !paused && !suspended && receiver is not null && !rateUnsupported &&
+        !inputUnavailable && now >= accessUntil && requestedRate is null;
+
+    private void RejectPendingRate()
+    {
+        if (requestedRate is int hertz)
+        {
+            unconfirmedRate = hertz;
+            requestedRate = null;
+        }
     }
 
     internal void SetPaused(bool value)
@@ -111,6 +145,7 @@ internal sealed class BatteryMonitor : IDisposable
         InvalidateActivity();
         receiver = null;
         problem = null;
+        rateUnsupported = false;
         discoveryAt = Environment.TickCount64 + 350;
         Evaluate();
     }
@@ -132,6 +167,8 @@ internal sealed class BatteryMonitor : IDisposable
         window.Arm(false);
         window.ForgetRawDevice();
         mouseFailed = spareFailed = true;
+        rateStale = true;
+        RejectPendingRate();
     }
 
     private void OnActivity(long? observedAt)
@@ -156,6 +193,13 @@ internal sealed class BatteryMonitor : IDisposable
 
         long now = Environment.TickCount64;
         long next = long.MaxValue;
+        if (requestedRate is not null && (operation is null || link != LinkState.ChangingPollingRate))
+        {
+            if (now >= rateRequestDeadline)
+                RejectPendingRate();
+            else
+                next = rateRequestDeadline;
+        }
         long eligibleAt = MonitorPolicy.EarliestAttempt(lastAttempt, interval, manualPending, accessUntil);
         bool arm = false;
         if (suspended || paused)
@@ -171,7 +215,7 @@ internal sealed class BatteryMonitor : IDisposable
                 link = LinkState.Error;
                 diagnostics.Write("Plazo de la ronda HID agotado");
             }
-            next = roundDeadline;
+            next = Math.Min(next, roundDeadline);
         }
         else if (now >= discoveryAt)
         {
@@ -179,11 +223,12 @@ internal sealed class BatteryMonitor : IDisposable
         }
         else if (receiver is not null)
         {
-            next = discoveryAt;
-            bool canTry = now >= eligibleAt;
-            if (canTry && MonitorPolicy.CanRead(now, activity, eligibleAt, preferences.StabilizationMs))
+            next = Math.Min(next, discoveryAt);
+            long attemptAt = requestedRate is not null ? accessUntil : eligibleAt;
+            bool canTry = now >= attemptAt;
+            if (canTry && MonitorPolicy.CanRead(now, activity, attemptAt, preferences.StabilizationMs))
             {
-                ReadAsync(receiver, activity!.Value, now);
+                ReadAsync(receiver, activity!.Value, now, requestedRate);
                 next = roundDeadline;
             }
             else
@@ -197,10 +242,10 @@ internal sealed class BatteryMonitor : IDisposable
                 else
                     link = activity.HasValue ? LinkState.Active : LinkState.WaitingInput;
 
-                // The open panel can prepare physical activity for a manual read.
-                // Sampling more often never shortens the automatic HID interval.
+                // User interaction can prepare physical activity for an on-demand command.
+                // Sampling more often never shortens the automatic battery interval.
                 long sampleAt = activity is long observed
-                    ? observed + (canTry || manualPending || panelVisible
+                    ? observed + (canTry || manualPending || interactionVisible
                         ? MonitorPolicy.CommandWindowMs : MonitorPolicy.ActivitySampleMs)
                     : now;
                 if (canTry && activity is long recent && now < recent + preferences.StabilizationMs)
@@ -214,7 +259,7 @@ internal sealed class BatteryMonitor : IDisposable
                         next = Math.Min(next, armAt);
                 }
                 if (!canTry)
-                    next = Math.Min(next, eligibleAt);
+                    next = Math.Min(next, attemptAt);
                 if (accessUntil > now)
                     next = Math.Min(next, accessUntil);
                 long sleepAt = (activity ?? connectedAt) + MonitorPolicy.PossibleSleepMs;
@@ -254,7 +299,9 @@ internal sealed class BatteryMonitor : IDisposable
             lastLoggedLink = link;
             diagnostics.Write(UiText.Default.Link(link));
         }
-        Changed?.Invoke(new(link, mouseDisplay, spareDisplay, manualPending, now < eligibleAt));
+        var rate = new PollingRateDisplay(pollingRate, rateStale, requestedRate, unconfirmedRate is not null,
+            CanChangePollingRate(now), rateUnsupported);
+        Changed?.Invoke(new(link, mouseDisplay, spareDisplay, manualPending, now < eligibleAt, rate));
         if (next != long.MaxValue)
             Schedule(next);
     }
@@ -314,6 +361,8 @@ internal sealed class BatteryMonitor : IDisposable
                 receiver = null;
                 activity = null;
                 mouseFailed = spareFailed = true;
+                rateStale = true;
+                RejectPendingRate();
                 problem = result.Status switch
                 {
                     HidStatus.Missing => LinkState.Missing,
@@ -326,17 +375,20 @@ internal sealed class BatteryMonitor : IDisposable
         Evaluate();
     }
 
-    private async void ReadAsync(string path, long observed, long now)
+    private async void ReadAsync(string path, long observed, long now, int? rateToSet)
     {
         using var current = operation = new();
-        lastAttempt = startedAt = now;
+        if (rateToSet is null)
+        {
+            lastAttempt = startedAt = now;
+            manualPending = false;
+        }
         roundDeadline = now + 3000;
-        manualPending = false;
-        link = LinkState.Reading;
+        link = rateToSet is null ? LinkState.Reading : LinkState.ChangingPollingRate;
         BatteryRead result;
         try
         {
-            result = await Task.Run(() => hid.Read(path, observed, current.Token))
+            result = await Task.Run(() => hid.Read(path, observed, current.Token, rateToSet))
                 .ConfigureAwait(ConfigureAwaitOptions.ContinueOnCapturedContext | ConfigureAwaitOptions.ForceYielding);
         }
         catch (OperationCanceledException) when (current.IsCancellationRequested)
@@ -353,8 +405,42 @@ internal sealed class BatteryMonitor : IDisposable
             return;
         roundDeadline = long.MaxValue;
         if (!current.IsCancellationRequested)
-            Accept(result);
+        {
+            if (rateToSet is int hertz)
+                AcceptRateChange(result, hertz);
+            else
+                Accept(result);
+        }
         Evaluate();
+    }
+
+    private void AcceptRateChange(BatteryRead result, int requested)
+    {
+        requestedRate = null;
+        unconfirmedRate = result.PollingRate == requested ? null : requested;
+        AcceptPollingRate(result);
+        if (result.Status == HidStatus.Busy)
+            problem = LinkState.Busy;
+        else if (result.Status == HidStatus.Missing)
+            problem = LinkState.Missing;
+        else if (result.Status == HidStatus.Ready && problem == LinkState.Busy)
+            problem = null;
+        AcceptAccess(result.Status);
+    }
+
+    private void AcceptPollingRate(BatteryRead result)
+    {
+        if (result.PollingRateSupported is bool supported)
+            rateUnsupported = !supported;
+        rateStale = result.PollingRate is null;
+        if (result.PollingRate is int hertz)
+        {
+            pollingRate = hertz;
+            if (unconfirmedRate == hertz)
+                unconfirmedRate = null;
+        }
+        if (rateUnsupported)
+            RejectPendingRate();
     }
 
     private void Accept(BatteryRead result)
@@ -362,6 +448,7 @@ internal sealed class BatteryMonitor : IDisposable
         var seen = DateTimeOffset.Now;
         Apply(result.Mouse, ref mouse, ref mouseFailed, seen);
         Apply(result.Spare, ref spare, ref spareFailed, seen);
+        AcceptPollingRate(result);
         problem = result.Status switch
         {
             HidStatus.Busy => LinkState.Busy,
@@ -374,18 +461,7 @@ internal sealed class BatteryMonitor : IDisposable
                 result.Spare.Status is ReplyStatus.Invalid or ReplyStatus.Rejected => LinkState.Error,
             _ => null
         };
-        if (result.Status == HidStatus.Busy)
-            accessUntil = Environment.TickCount64 +
-                MonitorPolicy.Backoff(++accessFailures, preferences.BusyStartSeconds, preferences.BusyMaxSeconds);
-        else
-            accessFailures = 0;
-
-        if (result.Status == HidStatus.Missing)
-        {
-            receiver = null;
-            activity = null;
-            ScheduleRediscovery();
-        }
+        AcceptAccess(result.Status);
         var mouseNotice = mouseAlert.Observe(result.Mouse);
         var spareNotice = spareAlert.Observe(result.Spare);
         if (Notifications && (mouseNotice.HasValue || spareNotice.HasValue))
@@ -393,6 +469,30 @@ internal sealed class BatteryMonitor : IDisposable
             Alert?.Invoke(
                 mouseNotice is AlertLevel mouseLevel ? new BatteryNotice(result.Mouse.Percent, mouseLevel) : null,
                 spareNotice is AlertLevel spareLevel ? new BatteryNotice(result.Spare.Percent, spareLevel) : null);
+        }
+    }
+
+    private void AcceptAccess(HidStatus status)
+    {
+        if (status == HidStatus.Busy)
+        {
+            accessUntil = Environment.TickCount64 +
+                MonitorPolicy.Backoff(++accessFailures, preferences.BusyStartSeconds, preferences.BusyMaxSeconds);
+            RejectPendingRate();
+        }
+        else
+        {
+            accessFailures = 0;
+        }
+
+        if (status == HidStatus.Missing)
+        {
+            receiver = null;
+            activity = null;
+            mouseFailed = spareFailed = true;
+            rateUnsupported = false;
+            RejectPendingRate();
+            ScheduleRediscovery();
         }
     }
 
